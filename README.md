@@ -1,6 +1,6 @@
 # Manos AI
 
-**Manos AI** is a Modular Adaptive Network Operating System for learning. It treats learning like an operating system: modular (instance-based subjects), adaptive (performance-driven learning), network (connected knowledge), and OS (core system orchestrating workflows).
+**Manos AI** is a Modular Adaptive Network Orchestrated System for learning. It treats learning like an learning system: modular (instance-based subjects), adaptive (performance-driven learning), network (connected knowledge), and OS (core system orchestrating workflows).
 
 ## System Overview
 
