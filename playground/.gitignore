@@ -1,0 +1,38 @@
+"""
+File: .gitignore
+
+Purpose:
+Ignore generated files and dependencies.
+"""
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Outputs
+outputs/
+*.json
+!requirements.txt
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models and data
+*.pdf
+*.docx
+*.txt
+sample_files/

@@ -1,0 +1,30 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database
+sqlalchemy==2.0.23
+pg8000==1.30.5
+alembic==1.13.1
+
+# AI / LLM
+requests==2.31.0
+ollama==0.2.1
+
+# PDF Processing
+pypdf==4.0.1
+pdfplumber==0.11.0
+
+# File Handling
+python-docx==1.1.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# Data Validation
+pydantic==2.5.0
+
+# Environment
+python-dotenv==1.0.0
+
+# Optional but useful (add now to avoid reinstall later)
+numpy==1.26.4
