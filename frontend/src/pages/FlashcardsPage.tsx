@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RotateCcw, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFlashcardStore } from '@/stores/flashcardStore';
+
+const formatElapsed = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+};
 
 export default function FlashcardsPage() {
   const params = useParams();
@@ -18,6 +24,10 @@ export default function FlashcardsPage() {
   const nextCard = useFlashcardStore((state) => state.nextCard);
   const prevCard = useFlashcardStore((state) => state.prevCard);
   const reviewCard = useFlashcardStore((state) => state.reviewCard);
+  const generationStatus = useFlashcardStore((state) => state.generationStatus);
+  const generationProgress = useFlashcardStore((state) => state.generationProgress);
+  const generationCards = useFlashcardStore((state) => state.generationCards);
+  const generationElapsed = useFlashcardStore((state) => state.generationElapsed);
 
   useEffect(() => {
     if (instanceId) {
@@ -75,7 +85,33 @@ export default function FlashcardsPage() {
         />
       </div>
 
-      {loading ? (
+      {loading && generationStatus ? (
+        <div className="rounded-2xl border border-border p-8 min-h-[280px] flex flex-col items-center justify-center gap-3 text-center">
+          <Loader2 className="h-6 w-6 text-primary animate-spin" />
+          <p className="text-sm font-medium text-foreground">{generationStatus}</p>
+
+          <div className="w-full max-w-xs bg-muted rounded-full h-1 overflow-hidden">
+            {generationProgress != null ? (
+              <div
+                className="bg-primary h-1 rounded-full transition-all duration-500"
+                style={{ width: `${Math.round(generationProgress * 100)}%` }}
+              />
+            ) : (
+              <div className="bg-primary/70 h-1 rounded-full w-1/3 animate-pulse" />
+            )}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            {generationCards} cards saved
+            {generationElapsed ? ` · ${formatElapsed(generationElapsed)} elapsed` : ''}
+          </p>
+          <p className="text-xs text-muted-foreground/70 max-w-sm">
+            The agent plans topics, retrieves sources, writes cards and reviews them with a
+            second model. This takes several minutes on local models — cards are saved as
+            each topic completes.
+          </p>
+        </div>
+      ) : loading ? (
         <div className="rounded-2xl border border-border p-8 min-h-[280px] flex items-center justify-center">
           <p className="text-sm text-muted-foreground">Loading flashcards…</p>
         </div>

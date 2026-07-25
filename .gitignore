@@ -46,8 +46,15 @@ site/
 coverage/
 
 # Local app data
+# Includes data/indexes/ - FAISS indexes are rebuildable from the chunks table
+# via POST /ingestion/reindex/{instance_id}, so they are not source.
 data/
 uploads/
+
+# Evaluation output: keep reports/latest.* as a committed sample, ignore the
+# timestamped runs and regenerated golden sets.
+backend/eval/reports/eval-*
+backend/eval/reports/golden_set_*
 
 # IDE / OS files
 .vscode/

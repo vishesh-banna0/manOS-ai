@@ -1,0 +1,264 @@
+{
+  "generated_at": "2026-07-25T11:57:27.068008",
+  "instance_id": 39,
+  "suites": [
+    "retrieval",
+    "generation",
+    "learning"
+  ],
+  "config": {
+    "query_strategy": "lexical",
+    "sample_size": 30,
+    "llm_judge": true
+  },
+  "retrieval": {
+    "queries": 8,
+    "index_size": 8,
+    "k": 10,
+    "configurations": {
+      "dense_only": {
+        "metrics": {
+          "queries": 8,
+          "hit_rate@1": 0.75,
+          "recall@1": 0.75,
+          "precision@1": 0.75,
+          "ndcg@1": 0.75,
+          "hit_rate@3": 1.0,
+          "recall@3": 1.0,
+          "precision@3": 0.3333,
+          "ndcg@3": 0.9077,
+          "hit_rate@5": 1.0,
+          "recall@5": 1.0,
+          "precision@5": 0.2,
+          "ndcg@5": 0.9077,
+          "hit_rate@10": 1.0,
+          "recall@10": 1.0,
+          "precision@10": 0.125,
+          "ndcg@10": 0.9077,
+          "mrr": 0.875,
+          "misses_at_5": 0
+        },
+        "failures": []
+      },
+      "hybrid": {
+        "metrics": {
+          "queries": 8,
+          "hit_rate@1": 1.0,
+          "recall@1": 1.0,
+          "precision@1": 1.0,
+          "ndcg@1": 1.0,
+          "hit_rate@3": 1.0,
+          "recall@3": 1.0,
+          "precision@3": 0.3333,
+          "ndcg@3": 1.0,
+          "hit_rate@5": 1.0,
+          "recall@5": 1.0,
+          "precision@5": 0.2,
+          "ndcg@5": 1.0,
+          "hit_rate@10": 1.0,
+          "recall@10": 1.0,
+          "precision@10": 0.125,
+          "ndcg@10": 1.0,
+          "mrr": 1.0,
+          "misses_at_5": 0
+        },
+        "failures": []
+      },
+      "hybrid_mmr": {
+        "metrics": {
+          "queries": 8,
+          "hit_rate@1": 1.0,
+          "recall@1": 1.0,
+          "precision@1": 1.0,
+          "ndcg@1": 1.0,
+          "hit_rate@3": 1.0,
+          "recall@3": 1.0,
+          "precision@3": 0.3333,
+          "ndcg@3": 1.0,
+          "hit_rate@5": 1.0,
+          "recall@5": 1.0,
+          "precision@5": 0.2,
+          "ndcg@5": 1.0,
+          "hit_rate@10": 1.0,
+          "recall@10": 1.0,
+          "precision@10": 0.125,
+          "ndcg@10": 1.0,
+          "mrr": 1.0,
+          "misses_at_5": 0
+        },
+        "failures": []
+      }
+    },
+    "best_configuration": "hybrid",
+    "ranked_by": "recall@5, then MRR, nDCG@5, recall@1",
+    "gain_over_dense_only": {
+      "recall@5": 0.0,
+      "recall@1": 0.25,
+      "mrr": 0.125,
+      "ndcg@5": 0.0923
+    },
+    "caveat": "Only 8 golden queries over 8 chunks - metrics saturate easily on a corpus this small. Index more documents before drawing conclusions."
+  },
+  "generation": {
+    "stored_deck": {
+      "cards": 7,
+      "lexical_groundedness_mean": 0.9327,
+      "lexical_groundedness_below_0.3": 0,
+      "self_contained_rate": 0.8571,
+      "duplicate_rate": 0.1429,
+      "difficulty_distribution": {
+        "easy": 0.4286,
+        "hard": 0.2857,
+        "medium": 0.2857
+      },
+      "difficulty_balance": 0.8571,
+      "avg_answer_words": 25.0,
+      "judge_groundedness_mean": 0.6429,
+      "judge_sampled": 7,
+      "judge_groundedness_below_0.5": 1,
+      "cards_without_provenance": 0,
+      "provenance_rate": 1.0,
+      "critic_groundedness_mean": 1.0,
+      "critic_scored_cards": 7,
+      "critic_vs_judge_gap": 0.3571,
+      "critic_calibration_warning": "The in-loop critic scored groundedness 1.0 but an independent judge scored 0.6429 (gap +0.36). The critic is likely over-accepting. Point CRITIC_MODEL at a stronger model than the author, and re-measure.",
+      "sample_warning": "Only 7 cards scored - too few to compare configurations reliably. Treat these numbers as directional."
+    },
+    "ab_test": {
+      "chunks_sampled": 2,
+      "baseline_cards": 6,
+      "agent_cards": 7,
+      "baseline_ungrounded": {
+        "cards": 6,
+        "lexical_groundedness_mean": 0.7431,
+        "lexical_groundedness_below_0.3": 1,
+        "self_contained_rate": 1.0,
+        "duplicate_rate": 0.0,
+        "difficulty_distribution": {
+          "easy": 0.3333,
+          "hard": 0.3333,
+          "medium": 0.3333
+        },
+        "difficulty_balance": 1.0,
+        "avg_answer_words": 18.7,
+        "judge_groundedness_mean": 0.25,
+        "judge_sampled": 6,
+        "judge_groundedness_below_0.5": 4
+      },
+      "agent_grounded": {
+        "cards": 7,
+        "lexical_groundedness_mean": 0.9327,
+        "lexical_groundedness_below_0.3": 0,
+        "self_contained_rate": 0.8571,
+        "duplicate_rate": 0.1429,
+        "difficulty_distribution": {
+          "easy": 0.4286,
+          "hard": 0.2857,
+          "medium": 0.2857
+        },
+        "difficulty_balance": 0.8571,
+        "avg_answer_words": 25.0,
+        "judge_groundedness_mean": 0.6429,
+        "judge_sampled": 7,
+        "judge_groundedness_below_0.5": 1,
+        "cards_without_provenance": 0,
+        "provenance_rate": 1.0,
+        "critic_groundedness_mean": 1.0,
+        "critic_scored_cards": 7,
+        "critic_vs_judge_gap": 0.3571,
+        "critic_calibration_warning": "The in-loop critic scored groundedness 1.0 but an independent judge scored 0.6429 (gap +0.36). The critic is likely over-accepting. Point CRITIC_MODEL at a stronger model than the author, and re-measure.",
+        "sample_warning": "Only 7 cards scored - too few to compare configurations reliably. Treat these numbers as directional."
+      },
+      "delta_agent_minus_baseline": {
+        "lexical_groundedness_mean": 0.1896,
+        "judge_groundedness_mean": 0.3929,
+        "self_contained_rate": -0.1429,
+        "duplicate_rate": 0.1429,
+        "difficulty_balance": -0.1429
+      },
+      "note": "duplicate_rate: lower is better. All other deltas: higher is better.",
+      "methodology_caveat": "The two sides do not see identical evidence: baseline cards are judged against the single chunk they were generated from, agent cards against all the chunks they cite. That favours neither consistently, but it means small deltas are noise. Compare on a deck of 50+ cards before drawing conclusions."
+    }
+  },
+  "learning": {
+    "simulation": {
+      "results": {
+        "sm2": {
+          "scheduler": "sm2",
+          "days_simulated": 120,
+          "deck_size": 60,
+          "daily_review_limit": 40,
+          "total_reviews": 1567,
+          "review_retention": 0.5999,
+          "final_recall_mean": 0.9797,
+          "cards_mastered": 59,
+          "mastery_rate": 0.9833,
+          "cards_never_reviewed": 0,
+          "deck_coverage": 1.0,
+          "recall_per_review": 0.03751,
+          "reviews_per_card": 26.12,
+          "avg_final_interval_days": 29.22,
+          "total_lapses": 627
+        },
+        "legacy_buggy": {
+          "scheduler": "legacy_buggy",
+          "days_simulated": 120,
+          "deck_size": 60,
+          "daily_review_limit": 40,
+          "total_reviews": 1866,
+          "review_retention": 0.4812,
+          "final_recall_mean": 0.8337,
+          "cards_mastered": 55,
+          "mastery_rate": 0.9167,
+          "cards_never_reviewed": 0,
+          "deck_coverage": 1.0,
+          "recall_per_review": 0.02681,
+          "reviews_per_card": 31.1,
+          "avg_final_interval_days": 60.25,
+          "total_lapses": 968
+        },
+        "fixed_1day": {
+          "scheduler": "fixed_1day",
+          "days_simulated": 120,
+          "deck_size": 60,
+          "daily_review_limit": 40,
+          "total_reviews": 4800,
+          "review_retention": 0.9663,
+          "final_recall_mean": 0.6667,
+          "cards_mastered": 40,
+          "mastery_rate": 0.6667,
+          "cards_never_reviewed": 20,
+          "deck_coverage": 0.6667,
+          "recall_per_review": 0.00833,
+          "reviews_per_card": 80.0,
+          "avg_final_interval_days": 0.0,
+          "total_lapses": 0
+        }
+      },
+      "comparison": {
+        "sm2_vs_legacy_final_recall": 0.146,
+        "sm2_vs_legacy_reviews": -299,
+        "sm2_vs_legacy_recall_per_review": 0.0107,
+        "sm2_vs_fixed_reviews_saved": 3233,
+        "sm2_vs_fixed_deck_coverage": 0.3333
+      },
+      "interpretation": "review_retention is in-session accuracy; final_recall_mean is modelled recall of the whole deck at the end. They diverge on purpose - drilling easy cards daily inflates the first while doing little for the second. fixed_1day never reached 20 of 60 cards: re-queuing everything daily exceeds the 40/day budget, so the tail of the deck starves. Its high review_retention (0.9663) is measured only on the cards it kept showing. SM-2 buys more retained knowledge per review than the legacy scheduler (0.03751 vs 0.02681) while issuing 299 fewer reviews."
+    },
+    "real_data": {
+      "reviews": 7,
+      "window_days": 90,
+      "retention_rate": 0.5714,
+      "retention_short_interval": 0.5714,
+      "retention_long_interval": null,
+      "retention_early": 0.5,
+      "retention_late": 0.5,
+      "retention_improvement": 0.0,
+      "cards_total": 7,
+      "cards_mature": 0,
+      "mastery_rate": 0.0,
+      "avg_ease_factor": 2.363,
+      "total_lapses": 3,
+      "reviews_per_card": 1.0
+    }
+  }
+}

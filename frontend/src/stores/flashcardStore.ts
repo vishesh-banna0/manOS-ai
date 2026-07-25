@@ -13,6 +13,11 @@ interface FlashcardStore {
   currentIndex: number;
   loading: boolean;
   error: string | null;
+  /** Live progress while the authoring agent runs. */
+  generationStatus: string | null;
+  generationProgress: number | null;
+  generationCards: number;
+  generationElapsed: number;
   loadFlashcards: (instanceId: string) => Promise<void>;
   nextCard: () => void;
   prevCard: () => void;
@@ -26,6 +31,10 @@ export const useFlashcardStore = create<FlashcardStore>((set, get) => ({
   currentIndex: 0,
   loading: false,
   error: null,
+  generationStatus: null,
+  generationProgress: null,
+  generationCards: 0,
+  generationElapsed: 0,
 
   loadFlashcards: async (instanceId) => {
     set({ loading: true, error: null });
@@ -44,15 +53,23 @@ export const useFlashcardStore = create<FlashcardStore>((set, get) => ({
   },
 
   generateFlashcards: async (instanceId) => {
-    set({ loading: true, error: null });
+    set({ loading: true, error: null, generationStatus: 'Starting the authoring agent...' });
     try {
-      await apiGenerateFlashcards(Number(instanceId));
+      // The agent runs for minutes; surface each stage instead of a dead spinner.
+      await apiGenerateFlashcards(Number(instanceId), (job) => {
+        set({
+          generationStatus: job.message || job.stage,
+          generationProgress: job.progress,
+          generationCards: job.counters.cards_created ?? 0,
+          generationElapsed: job.elapsed_seconds,
+        });
+      });
       await get().loadFlashcards(instanceId);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unable to generate flashcards. Please try again.';
       set({ error: errorMessage });
     } finally {
-      set({ loading: false });
+      set({ loading: false, generationStatus: null, generationProgress: null });
     }
   },
 
@@ -91,7 +108,17 @@ export const useFlashcardStore = create<FlashcardStore>((set, get) => ({
     }
   },
 
-  resetFlashcards: () => set({ flashcards: [], currentIndex: 0, loading: false, error: null }),
+  resetFlashcards: () =>
+    set({
+      flashcards: [],
+      currentIndex: 0,
+      loading: false,
+      error: null,
+      generationStatus: null,
+      generationProgress: null,
+      generationCards: 0,
+      generationElapsed: 0,
+    }),
 }));
 
 export default useFlashcardStore;

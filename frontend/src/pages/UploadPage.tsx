@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Upload, FileText, CheckCircle2, X, AlertCircle } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, X, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { documentsApi, generateFlashcards } from '@/services/api';
 
@@ -9,10 +9,48 @@ interface UploadedFile {
   name: string;
   size: string;
   status: 'uploading' | 'done' | 'error' | 'generating_flashcards';
-  progress: number;
+  /** null while the total is unknown, which renders an indeterminate bar. */
+  progress: number | null;
   error?: string;
   flashcardsGenerated?: boolean;
+  // Live agent progress
+  stage?: string;
+  cardsCreated?: number;
+  elapsed?: number;
+  topicsDone?: number;
+  topicsTotal?: number;
 }
+
+const formatElapsed = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+};
+
+// Keep in sync with MAX_UPLOAD_MB in backend/src/core/config.py
+const MAX_UPLOAD_MB = 100;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+const ALLOWED_EXTENSIONS = ['.pdf', '.txt', '.md', '.markdown', '.rst'];
+
+const formatSize = (bytes: number) =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${(bytes / 1024).toFixed(1)} KB`;
+
+/** Returns a user-facing reason the file cannot be uploaded, or undefined. */
+const rejectionReason = (file: File): string | undefined => {
+  if (file.size === 0) {
+    return 'This file is empty (0 bytes). Check that it downloaded fully — if it is stored in OneDrive, open it once to sync it locally, then try again.';
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return `File is ${formatSize(file.size)} — the limit is ${MAX_UPLOAD_MB} MB.`;
+  }
+  const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.includes(extension)) {
+    return `Unsupported file type "${extension || 'unknown'}". Supported: ${ALLOWED_EXTENSIONS.join(', ')}.`;
+  }
+  return undefined;
+};
 
 export default function UploadPage() {
   const { id: instanceId } = useParams();
@@ -27,15 +65,20 @@ export default function UploadPage() {
     const newFiles: UploadedFile[] = filesToUpload.map((f, idx) => ({
       id: `${Date.now()}-${idx}`,
       name: f.name,
-      size: `${(f.size / 1024).toFixed(1)} KB`,
-      status: 'uploading' as const,
+      size: formatSize(f.size),
+      // Catch unusable files here so the user is not left waiting on a round
+      // trip that can only fail. An empty file is usually an interrupted
+      // download or a cloud placeholder that never synced.
+      status: rejectionReason(f) ? ('error' as const) : ('uploading' as const),
       progress: 0,
+      error: rejectionReason(f),
     }));
     setFiles((prev) => [...prev, ...newFiles]);
 
     // Upload each file
     filesToUpload.forEach(async (file, index) => {
       const fileEntry = newFiles[index];
+      if (fileEntry.error) return;
       try {
         const response = await documentsApi.upload(instanceId, file);
         const warning = response.data?.warning as string | undefined;
@@ -59,28 +102,45 @@ export default function UploadPage() {
   const handleGenerateFlashcards = useCallback(async (fileId: string) => {
     if (!instanceId) return;
 
+    const patch = (fields: Partial<UploadedFile>) =>
+      setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, ...fields } : f)));
+
     try {
-      // Update status to show generation in progress
-      setFiles((prev) => prev.map((f) =>
-        f.id === fileId ? { ...f, status: 'generating_flashcards', progress: 50 } : f
-      ));
+      patch({
+        status: 'generating_flashcards',
+        progress: 0,
+        stage: 'Starting the authoring agent...',
+        cardsCreated: 0,
+        elapsed: 0,
+      });
 
-      // Generate flashcards
-      await generateFlashcards(instanceId);
+      const result = await generateFlashcards(instanceId, (job) => {
+        patch({
+          // Before the planner returns there is no total, so show an
+          // indeterminate bar rather than a misleading 0%.
+          progress: job.progress != null ? Math.round(job.progress * 100) : null,
+          stage: job.message || job.stage,
+          cardsCreated: job.counters.cards_created ?? 0,
+          elapsed: job.elapsed_seconds,
+          topicsDone: job.current,
+          topicsTotal: job.total,
+        });
+      });
 
-      // Mark as completed
-      setFiles((prev) => prev.map((f) =>
-        f.id === fileId ? { ...f, status: 'done', progress: 100, flashcardsGenerated: true } : f
-      ));
+      patch({
+        status: 'done',
+        progress: 100,
+        flashcardsGenerated: true,
+        cardsCreated: result.cards_created,
+        stage: undefined,
+      });
     } catch (error) {
       console.error('Flashcard generation failed:', error);
-      setFiles((prev) => prev.map((f) =>
-        f.id === fileId ? {
-          ...f,
-          status: 'error',
-          error: error instanceof Error ? error.message : 'Flashcard generation failed'
-        } : f
-      ));
+      patch({
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Flashcard generation failed',
+        stage: undefined,
+      });
     }
   }, [instanceId]);
 
@@ -104,7 +164,9 @@ export default function UploadPage() {
       >
         <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
         <p className="font-medium text-foreground mb-1">Drop files here or click to browse</p>
-        <p className="text-xs text-muted-foreground mb-4">PDF, TXT, MD — up to 10MB</p>
+        <p className="text-xs text-muted-foreground mb-4">
+          PDF, TXT, MD — up to {MAX_UPLOAD_MB}MB. PDFs must have a text layer (scans need OCR).
+        </p>
         <Button variant="outline" onClick={() => {
           const input = document.createElement('input');
           input.type = 'file'; input.multiple = true; input.accept = '.pdf,.txt,.md';
@@ -131,13 +193,44 @@ export default function UploadPage() {
                   </div>
                 )}
                 {file.status === 'generating_flashcards' && (
-                  <div className="w-full bg-muted rounded-full h-1 mt-1.5">
-                    <div className="bg-primary h-1 rounded-full transition-all" style={{ width: `${file.progress}%` }} />
-                    <p className="text-xs text-muted-foreground mt-1">Generating flashcards...</p>
+                  <div className="mt-2 space-y-1.5">
+                    <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                      {file.progress != null ? (
+                        <div
+                          className="bg-primary h-1 rounded-full transition-all duration-500"
+                          style={{ width: `${file.progress}%` }}
+                        />
+                      ) : (
+                        // Total unknown until the planner returns - an
+                        // indeterminate bar is honest, 0% is not.
+                        <div className="bg-primary/70 h-1 rounded-full w-1/3 animate-pulse" />
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs text-primary">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      <span className="truncate">{file.stage || 'Working...'}</span>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      {file.topicsTotal
+                        ? `Topic ${file.topicsDone ?? 0}/${file.topicsTotal} · `
+                        : ''}
+                      {file.cardsCreated ?? 0} cards saved
+                      {file.elapsed != null ? ` · ${formatElapsed(file.elapsed)} elapsed` : ''}
+                    </p>
+
+                    <p className="text-[11px] text-muted-foreground/70">
+                      This runs local models and takes several minutes. Cards are saved as
+                      each topic finishes — you can leave this page.
+                    </p>
                   </div>
                 )}
                 {file.status === 'done' && file.flashcardsGenerated && (
-                  <p className="text-xs text-success mt-1">Flashcards generated successfully!</p>
+                  <p className="text-xs text-success mt-1">
+                    {file.cardsCreated ?? 0} flashcards generated
+                    {file.elapsed ? ` in ${formatElapsed(file.elapsed)}` : ''}
+                  </p>
                 )}
                 {file.status === 'error' && file.error && (
                   <p className="text-xs text-destructive mt-1">{file.error}</p>

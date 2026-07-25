@@ -3,26 +3,22 @@ File: init_db.py
 
 Purpose:
 Initialize database tables for Manos AI.
+
+Creates any missing tables and adds columns introduced after a table already
+existed (see core.database.sync_schema). Safe to re-run.
 """
 
-import sys
 import os
+import sys
 
-# Fix import path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-print("Initializing Database...")
+print("Initializing database...")
 
-from backend.src.core.database import engine, Base
+# Importing core.database registers every model on Base via models/__init__,
+# so no model needs to be listed here by hand.
+from backend.src.core.database import init_db  # noqa: E402
 
-# IMPORTANT: import all models so SQLAlchemy registers them
-from backend.src.models.instance import Instance
-from backend.src.models.document import Document
-from backend.src.models.qa_pair import QAPair
-# add more models later if needed
+init_db()
 
-print("Creating tables...")
-
-Base.metadata.create_all(bind=engine)
-
-print("Database initialized successfully!")
+print("Database initialized successfully.")
