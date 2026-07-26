@@ -56,6 +56,10 @@ uploads/
 backend/eval/reports/eval-*
 backend/eval/reports/golden_set_*
 
+# Local notes
+pipeline.md
+InterviewQuestionBank.md
+
 # IDE / OS files
 .vscode/
 .idea/
