@@ -1,3 +1,4 @@
+import { lazy } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -6,11 +7,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/AppLayout";
 import HomePage from "@/pages/HomePage";
 import DashboardPage from "@/pages/DashboardPage";
-import UploadPage from "@/pages/UploadPage";
-import FlashcardsPage from "@/pages/FlashcardsPage";
-import TestsPage from "@/pages/TestsPage";
-import AnalyticsPage from "@/pages/AnalyticsPage";
 import NotFound from "@/pages/NotFound";
+const UploadPage = lazy(() => import("@/pages/UploadPage"));
+const FlashcardsPage = lazy(() => import("@/pages/FlashcardsPage"));
+const TestsPage = lazy(() => import("@/pages/TestsPage"));
+const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
 
 const queryClient = new QueryClient();
 

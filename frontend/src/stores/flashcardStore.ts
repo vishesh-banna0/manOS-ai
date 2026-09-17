@@ -22,7 +22,7 @@ interface FlashcardStore {
   nextCard: () => void;
   prevCard: () => void;
   reviewCard: (instanceId: string, correct: boolean) => Promise<void>;
-  generateFlashcards: (instanceId: string) => Promise<void>;
+  generateFlashcards: (instanceId: string, maxTopics?: number) => Promise<void>;
   resetFlashcards: () => void;
 }
 
@@ -52,19 +52,23 @@ export const useFlashcardStore = create<FlashcardStore>((set, get) => ({
     }
   },
 
-  generateFlashcards: async (instanceId) => {
-    set({ loading: true, error: null, generationStatus: 'Starting the authoring agent...' });
+  generateFlashcards: async (instanceId, maxTopics = 4) => {
+    if (get().generationStatus) return;
+    set({ loading: true, error: null, generationStatus: 'Starting the authoring agent...',
+      generationProgress: null, generationCards: 0, generationElapsed: 0 });
     try {
       // The agent runs for minutes; surface each stage instead of a dead spinner.
-      await apiGenerateFlashcards(Number(instanceId), (job) => {
+      const result = await apiGenerateFlashcards(Number(instanceId), (job) => {
         set({
           generationStatus: job.message || job.stage,
           generationProgress: job.progress,
           generationCards: job.counters.cards_created ?? 0,
           generationElapsed: job.elapsed_seconds,
         });
-      });
+      }, maxTopics);
       await get().loadFlashcards(instanceId);
+      if (result.warnings?.length) set({ error: result.warnings.join(' ') });
+      else if (result.cards_created === 0) set({ error: 'No new cards were created. Topics may already be covered; try a larger deck or check your document index.' });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unable to generate flashcards. Please try again.';
       set({ error: errorMessage });

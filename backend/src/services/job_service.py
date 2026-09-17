@@ -29,10 +29,15 @@ from typing import Any, Callable, Dict, List, Optional
 JOB_RETENTION = timedelta(minutes=30)
 
 
+class JobAlreadyRunning(ValueError):
+    """A workspace already has an authoring job in flight."""
+
+
 @dataclass
 class Job:
     id: str
     kind: str
+    key: Optional[str] = None
     status: str = "running"  # running | completed | failed
     stage: str = "starting"
     message: str = ""
@@ -69,7 +74,7 @@ class Job:
 class JobRegistry:
     def __init__(self):
         self._jobs: Dict[str, Job] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def create(self, kind: str) -> Job:
         self._evict_expired()
@@ -111,14 +116,18 @@ class JobRegistry:
             ]:
                 self._jobs.pop(job_id, None)
 
-    def run_in_background(self, kind: str, target: Callable[["JobHandle"], Any]) -> Job:
+    def run_in_background(self, kind: str, target: Callable[["JobHandle"], Any], key: Optional[str] = None) -> Job:
         """
         Start `target` on a worker thread and return its Job immediately.
 
         `target` receives a JobHandle it uses to report progress. Its return
         value becomes job.result.
         """
-        job = self.create(kind)
+        with self._lock:
+            if key and any(j.key == key and j.status == "running" for j in self._jobs.values()):
+                raise JobAlreadyRunning("Flashcard generation is already running for this workspace. Wait for it to finish before starting another deck.")
+            job = self.create(kind)
+            job.key = key
         handle = JobHandle(self, job.id)
 
         def runner():

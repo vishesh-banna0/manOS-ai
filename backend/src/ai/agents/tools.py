@@ -26,19 +26,22 @@ from ..embeddings.embedding_generator import (
     EmbeddingUnavailable,
     cosine_similarity,
     get_embedding,
+    get_embeddings,
 )
-from ..rag.retriever import get_retriever
+from ..rag.retriever import get_retriever, keyword_score, tokenize
 
 
 class AgentTools:
     """Tool implementations bound to one database session and instance."""
 
-    def __init__(self, db: Session, instance_id: int):
+    def __init__(self, db: Session, instance_id: int, document_id: Optional[int] = None):
         self.db = db
         self.instance_id = instance_id
+        self.document_id = document_id
         self._retriever = None
         # Cache of question -> embedding for semantic dedupe within a run.
         self._question_vectors: Dict[str, List[float]] = {}
+        self._embeddings_unavailable = False
 
     @property
     def retriever(self):
@@ -50,7 +53,29 @@ class AgentTools:
 
     def search_corpus(self, query: str, k: Optional[int] = None) -> List[dict]:
         """Retrieve grounding chunks for a query."""
-        return self.retriever.search(query, k=k or settings.RETRIEVAL_TOP_K)
+        matches = self.retriever.search(
+            query, k=k or settings.RETRIEVAL_TOP_K, document_id=self.document_id
+        )
+        if matches:
+            return matches
+        # Uploads retain chunks when Ollama/indexing is unavailable. Those
+        # chunks remain usable as grounded evidence through lexical retrieval.
+        tokens = tokenize(query)
+        scored = []
+        for row in self._chunks().all():
+            score = keyword_score(tokens, row.text)
+            if score > 0:
+                scored.append({"chunk_id": row.id, "text": row.text, "score": score,
+                               "document_id": row.document_id, "page_start": row.page_start,
+                               "page_end": row.page_end})
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return scored[:k or settings.RETRIEVAL_TOP_K]
+
+    def _chunks(self):
+        query = self.db.query(Chunk).filter(Chunk.instance_id == self.instance_id)
+        if self.document_id is not None:
+            query = query.filter(Chunk.document_id == self.document_id)
+        return query
 
     def corpus_outline(self, limit: int = 60) -> List[dict]:
         """
@@ -61,8 +86,7 @@ class AgentTools:
         author node then pulls the real text via retrieval.
         """
         rows = (
-            self.db.query(Chunk)
-            .filter(Chunk.instance_id == self.instance_id)
+            self._chunks()
             .order_by(Chunk.document_id, Chunk.position)
             .limit(limit)
             .all()
@@ -80,8 +104,7 @@ class AgentTools:
 
     def corpus_size(self) -> int:
         return (
-            self.db.query(func.count(Chunk.id))
-            .filter(Chunk.instance_id == self.instance_id)
+            self._chunks().with_entities(func.count(Chunk.id))
             .scalar()
             or 0
         )
@@ -96,14 +119,32 @@ class AgentTools:
         )
 
     def existing_questions(self) -> List[str]:
-        return [card.question for card in self.existing_cards()]
+        return [question for (question,) in self.db.query(Flashcard.question)
+                .filter(Flashcard.instance_id == self.instance_id).all()]
+
+    def prepare_question_vectors(self, questions: Sequence[str]) -> None:
+        """Embed uncached questions in batches, with one outage fallback per run."""
+        if self._embeddings_unavailable:
+            return
+        missing = list(dict.fromkeys(q for q in questions if q not in self._question_vectors))
+        if not missing:
+            return
+        try:
+            vectors = get_embeddings(missing)
+        except EmbeddingUnavailable:
+            self._embeddings_unavailable = True
+            return
+        self._question_vectors.update(zip(missing, vectors))
 
     def _question_vector(self, question: str) -> Optional[List[float]]:
         if question in self._question_vectors:
             return self._question_vectors[question]
+        if self._embeddings_unavailable:
+            return None
         try:
             vector = get_embedding(question)
         except EmbeddingUnavailable:
+            self._embeddings_unavailable = True
             return None
         self._question_vectors[question] = vector
         return vector
@@ -132,6 +173,9 @@ class AgentTools:
             if candidate.strip().lower() == normalized:
                 return True, 1.0, candidate
 
+        self.prepare_question_vectors([question, *against])
+        if self._embeddings_unavailable:
+            return self._lexical_duplicate(question, against, threshold)
         vector = self._question_vector(question)
         if vector is None:
             return self._lexical_duplicate(question, against, threshold)

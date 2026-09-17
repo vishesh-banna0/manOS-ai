@@ -6,6 +6,7 @@ Entry point of the FastAPI application.
 Handles app initialization, middleware, and route registration.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -26,6 +27,15 @@ from .core.config import settings
 from .core.database import init_db
 
 
+# uvicorn configures its own loggers but leaves the root logger without a
+# handler, so application INFO records (the per-agent latency/retry lines from
+# ai/llm/client.py) would be dropped. Configure it once, here.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting Manos AI backend...")
@@ -34,15 +44,28 @@ async def lifespan(app: FastAPI):
 
     # Report AI backend health at boot rather than failing mysteriously on the
     # first request.
+    print(f"LLM provider: {settings.LLM_PROVIDER} ({settings.LLM_MODEL})")
     if not llm_available(settings.LLM_MODEL):
+        where = (
+            settings.OPENROUTER_URL
+            if settings.LLM_PROVIDER == "openrouter"
+            else settings.OLLAMA_URL
+        )
+        hint = (
+            "Check OPENROUTER_API_KEY and OPENROUTER_MODEL."
+            if settings.LLM_PROVIDER == "openrouter"
+            else "Pull the model with `ollama pull`."
+        )
         print(
             f"  WARNING: generation model '{settings.LLM_MODEL}' unavailable at "
-            f"{settings.OLLAMA_URL}. Agents will use fallbacks."
+            f"{where}. {hint} Flashcard generation will fail until fixed."
         )
     if not embed_available():
         print(
-            f"  WARNING: embedding model '{settings.EMBED_MODEL}' unavailable. "
-            f"Retrieval is disabled until it is pulled."
+            f"  WARNING: embedding model '{settings.EMBED_MODEL}' unavailable at "
+            f"{settings.OLLAMA_URL}. Embeddings always run on Ollama, whatever "
+            f"LLM_PROVIDER is set to. Ingestion and retrieval are disabled "
+            f"until it is pulled."
         )
 
     yield

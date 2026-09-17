@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { AppSidebar } from '@/components/AppSidebar';
 import { AppHeader } from '@/components/AppHeader';
@@ -30,7 +30,9 @@ export function AppLayout() {
       <div className="flex-1 flex flex-col min-w-0">
         <AppHeader />
         <main className="flex-1 p-6 animate-fade-in">
-          <Outlet />
+          <Suspense fallback={<p role="status" className="text-muted-foreground">Loading page…</p>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

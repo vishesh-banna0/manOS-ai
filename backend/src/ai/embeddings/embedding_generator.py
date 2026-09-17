@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from collections import OrderedDict
 from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
@@ -34,7 +35,8 @@ from ...core.config import settings
 # and sentence-level calls behave predictably.
 MAX_INPUT_CHARS = 6000
 
-_cache: dict[str, List[float]] = {}
+_cache: OrderedDict[str, List[float]] = OrderedDict()
+MAX_CACHE_ENTRIES = 4096
 _cache_lock = threading.Lock()
 
 # Set to False after the batch endpoint 404s once, so we stop retrying it.
@@ -157,7 +159,7 @@ def get_embeddings(texts: Sequence[str], normalize: bool = True) -> List[List[fl
     results: List[Optional[List[float]]] = [None] * len(prepared)
 
     # Resolve from cache first; collect the rest for batching.
-    pending_indices: List[int] = []
+    pending_indices: dict[str, List[int]] = {}
     pending_texts: List[str] = []
 
     with _cache_lock:
@@ -167,24 +169,33 @@ def get_embeddings(texts: Sequence[str], normalize: bool = True) -> List[List[fl
                 continue
             cached = _cache.get(_cache_key(text))
             if cached is not None:
-                results[index] = cached
+                _cache.move_to_end(_cache_key(text))
+                results[index] = _normalize(cached) if normalize else list(cached)
             else:
-                pending_indices.append(index)
-                pending_texts.append(text)
+                if text not in pending_indices:
+                    pending_texts.append(text)
+                    pending_indices[text] = []
+                pending_indices[text].append(index)
 
-    for start in range(0, len(pending_texts), settings.EMBED_BATCH_SIZE):
-        batch_texts = pending_texts[start : start + settings.EMBED_BATCH_SIZE]
-        batch_indices = pending_indices[start : start + settings.EMBED_BATCH_SIZE]
+    batch_size = max(1, settings.EMBED_BATCH_SIZE)
+    for start in range(0, len(pending_texts), batch_size):
+        batch_texts = pending_texts[start : start + batch_size]
 
         vectors = _post_batch(batch_texts)
         if vectors is None:  # server lacks /api/embed
             vectors = [_post_single(text) for text in batch_texts]
 
-        for index, text, vector in zip(batch_indices, batch_texts, vectors):
+        for text, vector in zip(batch_texts, vectors):
             final = _normalize(vector) if normalize else list(vector)
-            results[index] = final
+            for index in pending_indices[text]:
+                results[index] = list(final)
             with _cache_lock:
-                _cache[_cache_key(text)] = final
+                # Store raw vectors so normalized and raw callers cannot poison
+                # each other's cache entries. Bound sentence-cache memory.
+                _cache[_cache_key(text)] = list(vector)
+                _cache.move_to_end(_cache_key(text))
+                while len(_cache) > MAX_CACHE_ENTRIES:
+                    _cache.popitem(last=False)
 
     return [vector if vector is not None else [0.0] * settings.EMBED_DIM for vector in results]
 

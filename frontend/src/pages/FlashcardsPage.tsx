@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { RotateCcw, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DeckSizeSelect } from '@/components/DeckSizeSelect';
 import { useFlashcardStore } from '@/stores/flashcardStore';
 
 const formatElapsed = (seconds: number) => {
@@ -14,6 +15,7 @@ export default function FlashcardsPage() {
   const params = useParams();
   const instanceId = params.id ?? '';
   const [showAnswer, setShowAnswer] = useState(false);
+  const [maxTopics, setMaxTopics] = useState(4);
 
   const flashcards = useFlashcardStore((state) => state.flashcards);
   const currentIndex = useFlashcardStore((state) => state.currentIndex);
@@ -57,7 +59,7 @@ export default function FlashcardsPage() {
 
   const handleGenerate = async () => {
     if (instanceId) {
-      await generateFlashcards(instanceId);
+      await generateFlashcards(instanceId, maxTopics);
       setShowAnswer(false);
     }
   };
@@ -69,7 +71,7 @@ export default function FlashcardsPage() {
           <h1 className="text-xl font-bold text-foreground">Flashcards</h1>
           <p className="text-sm text-muted-foreground">{position} / {total}</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => { loadFlashcards(instanceId); setShowAnswer(false); }}>
+        <Button variant="ghost" size="icon" disabled={loading || !!generationStatus} onClick={() => { loadFlashcards(instanceId); setShowAnswer(false); }}>
           <RotateCcw className="h-4 w-4" />
         </Button>
       </div>
@@ -78,6 +80,8 @@ export default function FlashcardsPage() {
         <p className="text-sm text-destructive">{error}</p>
       )}
 
+      <DeckSizeSelect value={maxTopics} onChange={setMaxTopics} disabled={loading || !!generationStatus} />
+
       <div className="w-full bg-muted rounded-full h-1">
         <div
           className="bg-primary h-1 rounded-full transition-all duration-300"
@@ -85,7 +89,7 @@ export default function FlashcardsPage() {
         />
       </div>
 
-      {loading && generationStatus ? (
+      {generationStatus ? (
         <div className="rounded-2xl border border-border p-8 min-h-[280px] flex flex-col items-center justify-center gap-3 text-center">
           <Loader2 className="h-6 w-6 text-primary animate-spin" />
           <p className="text-sm font-medium text-foreground">{generationStatus}</p>

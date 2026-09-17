@@ -15,7 +15,7 @@ from ..ai.llm.client import LLMUnavailable
 from ..core.database import SessionLocal, get_db
 from ..models.flashcard import Flashcard
 from ..services.flashcard_service import FlashcardService
-from ..services.job_service import jobs
+from ..services.job_service import JobAlreadyRunning, jobs
 
 router = APIRouter(prefix="/flashcards", tags=["Flashcards"])
 
@@ -52,6 +52,7 @@ def _present(flashcard: Flashcard) -> dict:
 def generate_flashcards(
     instance_id: int,
     max_topics: Optional[int] = Query(None, ge=1, le=40),
+    document_id: Optional[int] = Query(None, ge=1),
     wait: bool = Query(
         False,
         description="Block until the run finishes instead of returning a job id",
@@ -71,13 +72,13 @@ def generate_flashcards(
 
     # Validate up front so an impossible run fails now, not in a worker thread.
     try:
-        service.assert_ready(instance_id)
+        service.assert_ready(instance_id, document_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     if wait:
         try:
-            result = service.generate(instance_id, max_topics=max_topics)
+            result = service.generate(instance_id, max_topics=max_topics, document_id=document_id)
         except LLMUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc))
         return {"message": f"{result['cards_created']} flashcards created", **result}
@@ -91,11 +92,15 @@ def generate_flashcards(
                 instance_id,
                 max_topics=max_topics,
                 progress=handle.report,
+                document_id=document_id,
             )
         finally:
             session.close()
 
-    job = jobs.run_in_background("flashcards", task)
+    try:
+        job = jobs.run_in_background("flashcards", task, key=f"flashcards:{instance_id}")
+    except JobAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return {
         "message": "Flashcard generation started",

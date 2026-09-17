@@ -115,6 +115,7 @@ class Retriever:
         k: Optional[int] = None,
         use_mmr: bool = True,
         keyword_weight: Optional[float] = None,
+        document_id: Optional[int] = None,
     ) -> List[dict]:
         """
         Retrieve the top-k chunks for a query.
@@ -136,12 +137,15 @@ class Retriever:
         try:
             query_embedding = get_embedding(query)
         except EmbeddingUnavailable:
-            return self._keyword_only(query_tokens, k)
+            return self._keyword_only(query_tokens, k, document_id)
 
         candidates = self.store.search(
             query_embedding,
-            k=max(k, settings.RETRIEVAL_CANDIDATES),
+            k=self.store.size if document_id is not None else max(k, settings.RETRIEVAL_CANDIDATES),
         )
+        if document_id is not None:
+            candidates = [c for c in candidates if c.get("document_id") == document_id]
+            candidates = candidates[:max(k, settings.RETRIEVAL_CANDIDATES)]
         if not candidates:
             return []
 
@@ -172,10 +176,12 @@ class Retriever:
             settings.RETRIEVAL_MMR_LAMBDA,
         )
 
-    def _keyword_only(self, query_tokens: List[str], k: int) -> List[dict]:
+    def _keyword_only(self, query_tokens: List[str], k: int, document_id: Optional[int] = None) -> List[dict]:
         """Degraded path when the embedding backend is down."""
         scored = []
         for record in self.store.all_records():
+            if document_id is not None and record.get("document_id") != document_id:
+                continue
             score = keyword_score(query_tokens, record.get("text", ""))
             if score > 0:
                 scored.append({**record, "score": score, "dense_score": 0.0, "keyword_score": score})

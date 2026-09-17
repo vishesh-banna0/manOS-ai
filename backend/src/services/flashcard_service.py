@@ -32,19 +32,20 @@ class FlashcardService:
 
     # ----------------------------------------------------------- generation
 
-    def assert_ready(self, instance_id: int) -> None:
+    def assert_ready(self, instance_id: int, document_id: Optional[int] = None) -> None:
         """
         Raise if there is nothing to author from.
 
         Checked before a job is queued so the user gets an immediate 400
         instead of a background job that fails seconds later.
         """
-        indexed_chunks = (
+        query = (
             self.db.query(func.count(Chunk.id))
             .filter(Chunk.instance_id == instance_id)
-            .scalar()
-            or 0
         )
+        if document_id is not None:
+            query = query.filter(Chunk.document_id == document_id)
+        indexed_chunks = query.scalar() or 0
 
         if indexed_chunks == 0:
             raise ValueError(
@@ -57,6 +58,7 @@ class FlashcardService:
         instance_id: int,
         max_topics: Optional[int] = None,
         progress=None,
+        document_id: Optional[int] = None,
     ) -> Dict:
         """
         Run the retrieval-grounded authoring agent for this instance.
@@ -64,9 +66,9 @@ class FlashcardService:
         Raises:
             ValueError: nothing has been ingested yet.
         """
-        self.assert_ready(instance_id)
+        self.assert_ready(instance_id, document_id)
         return run_flashcard_agent(
-            self.db, instance_id, max_topics=max_topics, progress=progress
+            self.db, instance_id, max_topics=max_topics, progress=progress, document_id=document_id
         )
 
     # --------------------------------------------------------------- review

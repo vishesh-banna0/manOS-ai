@@ -28,6 +28,11 @@ def service_status():
 
     return {
         "status": "ready" if (embeddings_ok and llm_ok) else "degraded",
+        "llm_provider": settings.LLM_PROVIDER,
+        "fallback_provider": settings.LLM_FALLBACK_PROVIDER or None,
+        # Whether a key is configured, never the key itself.
+        "api_key_configured": bool(settings.OPENROUTER_API_KEY),
+        # Embeddings always run on Ollama - OpenRouter has no embeddings API.
         "ollama_url": settings.OLLAMA_URL,
         "models": {
             "embedding": {"name": settings.EMBED_MODEL, "available": embeddings_ok},

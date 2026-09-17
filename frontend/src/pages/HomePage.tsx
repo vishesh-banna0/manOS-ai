@@ -2,7 +2,7 @@ import { useInstanceStore, Instance } from '@/stores/instanceStore';
 import { useNavigate } from 'react-router-dom';
 import { Plus, BookOpen, BarChart3, ArrowRight, Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { instancesApi } from '@/services/api';
 
 export default function HomePage() {
@@ -14,12 +14,7 @@ export default function HomePage() {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
 
-  // Fetch instances on mount
-  useEffect(() => {
-    fetchInstances();
-  }, []);
-
-  const fetchInstances = async () => {
+  const fetchInstances = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -31,7 +26,11 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [setLoading, setError, setInstances]);
+
+  useEffect(() => {
+    fetchInstances();
+  }, [fetchInstances]);
 
   const handleCreate = async () => {
     if (!name.trim()) return;

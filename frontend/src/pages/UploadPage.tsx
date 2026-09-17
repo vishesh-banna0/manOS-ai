@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Upload, FileText, CheckCircle2, X, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DeckSizeSelect } from '@/components/DeckSizeSelect';
 import { documentsApi, generateFlashcards } from '@/services/api';
 
 interface UploadedFile {
@@ -13,6 +14,7 @@ interface UploadedFile {
   progress: number | null;
   error?: string;
   flashcardsGenerated?: boolean;
+  documentId?: number;
   // Live agent progress
   stage?: string;
   cardsCreated?: number;
@@ -56,6 +58,8 @@ export default function UploadPage() {
   const { id: instanceId } = useParams();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [maxTopics, setMaxTopics] = useState(4);
+  const generating = files.some((file) => file.status === 'generating_flashcards');
 
   const handleFiles = useCallback(async (fileList: FileList) => {
     if (!instanceId) return;
@@ -75,10 +79,11 @@ export default function UploadPage() {
     }));
     setFiles((prev) => [...prev, ...newFiles]);
 
-    // Upload each file
-    filesToUpload.forEach(async (file, index) => {
+    // Index one file at a time so large PDFs do not compete for the local
+    // embedding model and saturate the backend's worker threads.
+    for (const [index, file] of filesToUpload.entries()) {
       const fileEntry = newFiles[index];
-      if (fileEntry.error) return;
+      if (fileEntry.error) continue;
       try {
         const response = await documentsApi.upload(instanceId, file);
         const warning = response.data?.warning as string | undefined;
@@ -87,6 +92,7 @@ export default function UploadPage() {
           progress: 100,
           status: 'done',
           error: warning,
+          documentId: response.data.document.id,
         } : f));
       } catch (error) {
         console.error('Upload failed for', file.name, error);
@@ -96,11 +102,12 @@ export default function UploadPage() {
           error: error instanceof Error ? error.message : 'Network error - backend may not be running'
         } : f));
       }
-    });
+    }
   }, [instanceId]);
 
   const handleGenerateFlashcards = useCallback(async (fileId: string) => {
-    if (!instanceId) return;
+    const file = files.find((entry) => entry.id === fileId);
+    if (!instanceId || !file?.documentId || generating) return;
 
     const patch = (fields: Partial<UploadedFile>) =>
       setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, ...fields } : f)));
@@ -112,6 +119,7 @@ export default function UploadPage() {
         stage: 'Starting the authoring agent...',
         cardsCreated: 0,
         elapsed: 0,
+        error: undefined,
       });
 
       const result = await generateFlashcards(instanceId, (job) => {
@@ -125,24 +133,27 @@ export default function UploadPage() {
           topicsDone: job.current,
           topicsTotal: job.total,
         });
-      });
+      }, maxTopics, file.documentId);
 
       patch({
         status: 'done',
         progress: 100,
-        flashcardsGenerated: true,
+        flashcardsGenerated: result.cards_created > 0,
         cardsCreated: result.cards_created,
         stage: undefined,
+        error: result.warnings?.join(' ') || (result.cards_created === 0
+          ? 'No new cards were created. The topics may already be covered; try a larger deck or check the AI connection.'
+          : undefined),
       });
     } catch (error) {
       console.error('Flashcard generation failed:', error);
       patch({
-        status: 'error',
+        status: 'done',
         error: error instanceof Error ? error.message : 'Flashcard generation failed',
         stage: undefined,
       });
     }
-  }, [instanceId]);
+  }, [instanceId, files, generating, maxTopics]);
 
   const removeFile = (id: string) => setFiles((prev) => prev.filter((f) => f.id !== id));
 
@@ -150,8 +161,10 @@ export default function UploadPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-bold text-foreground">Upload Documents</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Upload PDFs or text files to generate Q&A pairs</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Upload PDFs or text files to create flashcards from each document.</p>
       </div>
+
+      <DeckSizeSelect value={maxTopics} onChange={setMaxTopics} disabled={generating} />
 
       {/* Drop zone */}
       <div
@@ -189,7 +202,7 @@ export default function UploadPage() {
                 {file.status === 'uploading' && (
                   <div className="w-full bg-muted rounded-full h-1 mt-1.5">
                     <div className="bg-primary h-1 rounded-full transition-all" style={{ width: `${file.progress}%` }} />
-                    <p className="text-xs text-muted-foreground mt-1">Uploading...</p>
+                    <p className="text-xs text-muted-foreground mt-1">Waiting, uploading or indexing…</p>
                   </div>
                 )}
                 {file.status === 'generating_flashcards' && (
@@ -221,7 +234,7 @@ export default function UploadPage() {
                     </p>
 
                     <p className="text-[11px] text-muted-foreground/70">
-                      This runs local models and takes several minutes. Cards are saved as
+                      Cards are checked against your document and saved as
                       each topic finishes — you can leave this page.
                     </p>
                   </div>
@@ -243,9 +256,10 @@ export default function UploadPage() {
                 <Button
                   size="sm"
                   onClick={() => handleGenerateFlashcards(file.id)}
+                  disabled={generating || !file.documentId}
                   className="mr-2"
                 >
-                  Generate Flashcards
+                  {file.error ? 'Retry Generation' : 'Generate Flashcards'}
                 </Button>
               )}
               {file.status === 'done' && file.flashcardsGenerated && (

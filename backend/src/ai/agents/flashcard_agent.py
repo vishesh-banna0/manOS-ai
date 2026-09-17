@@ -27,6 +27,8 @@ What makes it agentic rather than a pipeline:
 from __future__ import annotations
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -83,7 +85,7 @@ def _format_evidence(chunks: List[dict]) -> str:
 class FlashcardAgent:
     """Authors grounded flashcards for one learning instance."""
 
-    def __init__(self, db: Session, instance_id: int, progress=None):
+    def __init__(self, db: Session, instance_id: int, progress=None, document_id: Optional[int] = None):
         """
         Args:
             progress: optional callable(stage=..., message=..., current=...,
@@ -93,7 +95,7 @@ class FlashcardAgent:
         """
         self.db = db
         self.instance_id = instance_id
-        self.tools = AgentTools(db, instance_id)
+        self.tools = AgentTools(db, instance_id, document_id=document_id)
         self.trace = LLMTrace()
         self._progress = progress
 
@@ -105,6 +107,7 @@ class FlashcardAgent:
 
     def run(self, max_topics: Optional[int] = None) -> AgentResult:
         result = AgentResult()
+        started = time.perf_counter()
 
         corpus_size = self.tools.corpus_size()
         if corpus_size == 0:
@@ -123,7 +126,7 @@ class FlashcardAgent:
 
         try:
             plan = self._plan(max_topics or settings.AGENT_MAX_TOPICS)
-        except (LLMUnavailable, LLMInvalidOutput) as exc:
+        except LLMInvalidOutput as exc:
             result.warnings.append(f"Planner failed ({exc}); falling back to outline topics.")
             plan = self._fallback_plan(max_topics or settings.AGENT_MAX_TOPICS)
 
@@ -143,15 +146,10 @@ class FlashcardAgent:
             total=len(plan),
         )
 
-        for index, topic_spec in enumerate(plan):
-            topic_report = self._process_topic(
-                topic_spec, known_questions, result, index, len(plan)
-            )
+        for index, (topic_spec, topic_report) in enumerate(self._topic_reports(plan, known_questions, result)):
             result.topics.append(topic_report)
 
             accepted_cards = topic_report.pop("accepted_cards", [])
-            for card in accepted_cards:
-                known_questions.append(card["question"])
 
             # Save per topic rather than batching to the end: a run takes
             # minutes, and this way cards are durable as soon as they are
@@ -179,7 +177,49 @@ class FlashcardAgent:
         )
 
         result.trace = self.trace.summary()
+        result.trace["wall_ms"] = round((time.perf_counter() - started) * 1000)
         return result
+
+    def _topic_reports(self, plan, known_questions, result):
+        # Local/fallback models share one device; concurrent inference can make
+        # them slower. Only overlap independent hosted author/critic calls.
+        workers = settings.AGENT_TOPIC_CONCURRENCY
+        if settings.LLM_PROVIDER == "ollama" or settings.LLM_FALLBACK_PROVIDER == "ollama":
+            workers = 1
+        if workers <= 1:
+            for index, topic in enumerate(plan):
+                report = self._process_topic(topic, known_questions, result, index, len(plan))
+                yield topic, report
+            return
+
+        def process(topic, evidence, index):
+            # Worker has no database session and does no persistence/dedupe.
+            worker = FlashcardAgent(None, self.instance_id, progress=lambda **fields: self._report(
+                **{key: value for key, value in fields.items() if key not in {"current", "total"}}
+            ))
+            partial = AgentResult()
+            report = worker._process_topic(
+                topic, [], partial, index, len(plan), evidence=evidence, deduplicate=False
+            )
+            return report, partial, worker.trace.calls
+
+        with ThreadPoolExecutor(max_workers=min(workers, len(plan))) as executor:
+            futures = {}
+            for index, topic in enumerate(plan):
+                evidence = self.tools.search_corpus(topic.get("query") or topic["topic"])
+                futures[executor.submit(process, topic, evidence, index)] = topic
+            for future in as_completed(futures):
+                report, partial, calls = future.result()
+                for field_name in ("drafts", "rejected", "repair_rounds"):
+                    setattr(result, field_name, getattr(result, field_name) + getattr(partial, field_name))
+                result.warnings.extend(partial.warnings)
+                self.trace.calls.extend(calls)
+                report["accepted_cards"] = self._deduplicate(
+                    report["accepted_cards"], known_questions, report, result
+                )
+                report["accepted"] = len(report["accepted_cards"])
+                result.accepted += report["accepted"]
+                yield futures[future], report
 
     # -------------------------------------------------------------- planning
 
@@ -262,6 +302,8 @@ Return ONLY a JSON object with a "topics" array:
         result: AgentResult,
         topic_index: int = 0,
         topic_total: int = 0,
+        evidence: Optional[List[dict]] = None,
+        deduplicate: bool = True,
     ) -> dict:
         topic = topic_spec["topic"]
         label = f"Topic {topic_index + 1}/{topic_total}: {topic[:45]}"
@@ -284,11 +326,13 @@ Return ONLY a JSON object with a "topics" array:
             current=topic_index,
             total=topic_total,
         )
-        evidence = self.tools.search_corpus(topic_spec.get("query") or topic)
+        if evidence is None:
+            evidence = self.tools.search_corpus(topic_spec.get("query") or topic)
         report["retrieved_chunks"] = len(evidence)
 
         if not evidence:
             report["notes"].append("no evidence retrieved; skipped")
+            result.warnings.append(f"No source text found for '{topic}'. Check the document index.")
             return report
 
         chunk_ids = [chunk["chunk_id"] for chunk in evidence]
@@ -386,24 +430,33 @@ Return ONLY a JSON object with a "topics" array:
 
         # --- Semantic dedupe before persisting ---
         for card in accepted:
-            is_dup, score, match = self.tools.is_duplicate(card["question"], known_questions)
-            if is_dup:
-                report["duplicates"] += 1
-                result.duplicates += 1
-                report["notes"].append(
-                    f"dropped duplicate (sim={score:.2f}): {card['question'][:60]}"
-                )
-                continue
-
             card["topic"] = topic
             card["source_chunk_ids"] = chunk_ids
             card.pop("_feedback", None)
-            report["accepted_cards"].append(card)
-            known_questions.append(card["question"])
+
+        report["accepted_cards"] = (
+            self._deduplicate(accepted, known_questions, report, result)
+            if deduplicate else accepted
+        )
 
         report["accepted"] = len(report["accepted_cards"])
         result.accepted += report["accepted"]
         return report
+
+    def _deduplicate(self, cards, known_questions, report, result):
+        if cards and hasattr(self.tools, "prepare_question_vectors"):
+            self.tools.prepare_question_vectors([*known_questions, *(c["question"] for c in cards)])
+        fresh = []
+        for card in cards:
+            is_dup, score, _ = self.tools.is_duplicate(card["question"], known_questions)
+            if is_dup:
+                report["duplicates"] += 1
+                result.duplicates += 1
+                report["notes"].append(f"dropped duplicate (sim={score:.2f}): {card['question'][:60]}")
+            else:
+                fresh.append(card)
+                known_questions.append(card["question"])
+        return fresh
 
     # ----------------------------------------------------------- LLM  nodes
 
@@ -430,7 +483,7 @@ Hard rules:
   the answer.
 - Aim for this difficulty mix: {', '.join(mix)}.
 
-Return ONLY a JSON object with a "cards" array of exactly {count} entries:
+Return ONLY a JSON object with a "cards" array of at most {count} entries:
 {{
   "cards": [
     {{
@@ -561,7 +614,8 @@ def run_flashcard_agent(
     instance_id: int,
     max_topics: Optional[int] = None,
     progress=None,
+    document_id: Optional[int] = None,
 ) -> dict:
     """Convenience entry point used by the service/API layer."""
-    agent = FlashcardAgent(db, instance_id, progress=progress)
+    agent = FlashcardAgent(db, instance_id, progress=progress, document_id=document_id)
     return agent.run(max_topics=max_topics).to_dict()

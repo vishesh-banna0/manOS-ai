@@ -57,16 +57,44 @@ class Settings:
         "postgresql+pg8000://postgres:1234@localhost:5432/manos_ai",
     )
 
-    # ----- Ollama / LLM -----
-    OLLAMA_URL: str = _env("OLLAMA_URL", "http://localhost:11434")
+    # ----- LLM provider -----
+    # "openrouter" (hosted) or "ollama" (local). Only client._raw_generate()
+    # branches on this; the agents stay provider-agnostic.
+    LLM_PROVIDER: str = _env("LLM_PROVIDER", "openrouter").lower()
 
-    # Main generation model (authoring, planning, recommendations)
-    LLM_MODEL: str = _env("LLM_MODEL", "llama3:8b")
+    # Provider to try when the primary one fails with a transient error.
+    # Empty = disabled. Set to "ollama" to fall back to local models.
+    LLM_FALLBACK_PROVIDER: str = _env("LLM_FALLBACK_PROVIDER", "").lower()
+
+    # ----- OpenRouter -----
+    OPENROUTER_URL: str = _env("OPENROUTER_URL", "https://openrouter.ai/api/v1")
+    # Secret. Never logged, never returned by an API route.
+    OPENROUTER_API_KEY: str = _env("OPENROUTER_API_KEY")
+    OPENROUTER_MODEL: str = _env(
+        "OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"
+    )
+
+    # ----- Ollama -----
+    # Still required even on OpenRouter: embeddings have no OpenRouter
+    # equivalent, so ingestion and semantic dedupe always use Ollama.
+    OLLAMA_URL: str = _env("OLLAMA_URL", "http://localhost:11434")
+    OLLAMA_MODEL: str = _env("LLM_MODEL", "llama3:8b")
+    OLLAMA_CRITIC_MODEL: str = _env("CRITIC_MODEL", "qwen2.5:7b")
+
+    # ----- Resolved model names -----
+    # Call sites just ask for settings.LLM_MODEL / CRITIC_MODEL and get a name
+    # that means something to whichever provider is active.
+    LLM_MODEL: str = OPENROUTER_MODEL if LLM_PROVIDER == "openrouter" else OLLAMA_MODEL
 
     # Critic model. Kept as a separate knob because self-critique quality is
     # the weakest link in the authoring loop; point this at a stronger model
-    # than LLM_MODEL when one is available.
-    CRITIC_MODEL: str = _env("CRITIC_MODEL", "qwen2.5:7b")
+    # than LLM_MODEL when one is available. Defaults to the same model on
+    # OpenRouter - one model serves every agent unless you override it.
+    CRITIC_MODEL: str = (
+        _env("OPENROUTER_CRITIC_MODEL", OPENROUTER_MODEL)
+        if LLM_PROVIDER == "openrouter"
+        else OLLAMA_CRITIC_MODEL
+    )
 
     EMBED_MODEL: str = _env("EMBED_MODEL", "nomic-embed-text")
     EMBED_DIM: int = _env_int("EMBED_DIM", 768)
@@ -76,6 +104,10 @@ class Settings:
 
     LLM_TIMEOUT: int = _env_int("LLM_TIMEOUT", 180)
     LLM_MAX_RETRIES: int = _env_int("LLM_MAX_RETRIES", 2)
+    # Exponential backoff between retries of transient failures (429 / 5xx /
+    # timeout), in seconds: base * 2**attempt, capped.
+    LLM_BACKOFF_BASE: float = _env_float("LLM_BACKOFF_BASE", 1.0)
+    LLM_BACKOFF_MAX: float = _env_float("LLM_BACKOFF_MAX", 30.0)
     LLM_TEMPERATURE: float = _env_float("LLM_TEMPERATURE", 0.2)
     EMBED_TIMEOUT: int = _env_int("EMBED_TIMEOUT", 60)
 
@@ -95,6 +127,12 @@ class Settings:
 
     # ----- Agent budgets -----
     AGENT_MAX_TOPICS: int = _env_int("AGENT_MAX_TOPICS", 12)
+    # Hosted requests can overlap; local inference remains sequential. Keep
+    # free hosted tiers sequential by default to respect their tight limits.
+    AGENT_TOPIC_CONCURRENCY: int = max(1, min(4, _env_int(
+        "AGENT_TOPIC_CONCURRENCY",
+        1 if LLM_PROVIDER == "ollama" or OPENROUTER_MODEL.endswith(":free") else 2,
+    )))
     AGENT_CARDS_PER_TOPIC: int = _env_int("AGENT_CARDS_PER_TOPIC", 3)
     AGENT_MAX_REPAIR_ROUNDS: int = _env_int("AGENT_MAX_REPAIR_ROUNDS", 2)
     AGENT_DUPLICATE_THRESHOLD: float = _env_float("AGENT_DUPLICATE_THRESHOLD", 0.88)

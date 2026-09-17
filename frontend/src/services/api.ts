@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  timeout: 30_000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -9,10 +10,11 @@ const api = axios.create({
 const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 
 const handleApiError = (error: unknown) => {
-  const maybeAxios = error as { response?: { data?: { detail?: string } }; message?: string };
-  return (
-    maybeAxios?.response?.data?.detail || maybeAxios?.message || 'Unexpected API error'
-  );
+  const maybeAxios = error as { response?: { data?: { detail?: unknown } }; message?: string };
+  const detail = maybeAxios?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map((item) => item.msg || 'Invalid input').join('; ');
+  return maybeAxios?.message || 'Unexpected API error';
 };
 
 export const instancesApi = {
@@ -30,6 +32,7 @@ export const documentsApi = {
     try {
       return await api.post(`/documents/upload/${instanceId}`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: AGENT_TIMEOUT_MS,
       });
     } catch (error) {
       throw new Error(handleApiError(error));
@@ -70,10 +73,11 @@ export interface JobStatus {
 export const startFlashcardGeneration = async (
   instanceId: number | string,
   maxTopics?: number,
+  documentId?: number,
 ): Promise<{ job_id: string }> => {
   try {
     const response = await api.post(`/flashcards/generate/${instanceId}`, null, {
-      params: maxTopics ? { max_topics: maxTopics } : undefined,
+      params: { max_topics: maxTopics, document_id: documentId },
     });
     return response.data;
   } catch (error) {
@@ -97,22 +101,35 @@ export const generateFlashcards = async (
   instanceId: number | string,
   onProgress?: (status: JobStatus) => void,
   maxTopics?: number,
+  documentId?: number,
 ): Promise<FlashcardAgentResult> => {
-  const { job_id } = await startFlashcardGeneration(instanceId, maxTopics);
+  const { job_id } = await startFlashcardGeneration(instanceId, maxTopics, documentId);
+  let failures = 0;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    const status = await getJob(job_id);
+    let status: JobStatus;
+    try {
+      // Keep the HTTP status for deciding which polling failures are retryable.
+      status = (await api.get<JobStatus>(`/jobs/${job_id}`)).data;
+      failures = 0;
+    } catch (error) {
+      const code = axios.isAxiosError(error) ? error.response?.status : undefined;
+      if ((code && code < 500 && code !== 429) || ++failures >= 4) {
+        throw new Error(handleApiError(error));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500 * failures));
+      continue;
+    }
     onProgress?.(status);
 
     if (status.status === 'completed') {
-      return status.result ?? ({ cards_created: 0 } as FlashcardAgentResult);
+      if (!status.result) throw new Error('Generation completed without a result. Please refresh your deck.');
+      return status.result;
     }
     if (status.status === 'failed') {
       throw new Error(status.error || 'Flashcard generation failed.');
     }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 };
 
@@ -294,7 +311,7 @@ export const agentsApi = {
 export const ingestionApi = {
   status: (instanceId: string | number) => api.get(`/ingestion/status/${instanceId}`),
   health: () => api.get('/ingestion/status'),
-  reindex: (instanceId: string | number) => api.post(`/ingestion/reindex/${instanceId}`),
+  reindex: (instanceId: string | number) => api.post(`/ingestion/reindex/${instanceId}`, null, { timeout: AGENT_TIMEOUT_MS }),
 };
 
 export default api;

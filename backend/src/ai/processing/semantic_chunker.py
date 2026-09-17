@@ -63,7 +63,12 @@ def _segment_to_sentences(segment: str, page: int) -> List[Dict]:
         cleaned = " ".join(raw.split()).strip()
         if not cleaned:
             continue
-        results.append({"text": cleaned, "page": page, "words": len(cleaned.split())})
+        # Extracted tables/code may contain thousands of words without any
+        # punctuation. Split them before embedding to avoid silent truncation.
+        words = cleaned.split()
+        for start in range(0, len(words), settings.CHUNK_MAX_WORDS):
+            part = words[start:start + settings.CHUNK_MAX_WORDS]
+            results.append({"text": " ".join(part), "page": page, "words": len(part)})
     return results
 
 
@@ -96,7 +101,8 @@ def _greedy_pack(sentences: List[Dict], breakpoints: set[int]) -> List[List[Dict
     merged: List[List[Dict]] = []
     for group in groups:
         words = sum(s["words"] for s in group)
-        if merged and words < settings.CHUNK_MIN_WORDS:
+        if (merged and words < settings.CHUNK_MIN_WORDS
+                and sum(s["words"] for s in merged[-1]) + words <= settings.CHUNK_MAX_WORDS):
             merged[-1].extend(group)
         else:
             merged.append(group)
@@ -145,7 +151,7 @@ def semantic_chunk_text(text: str, embeddings: Optional[List[List[float]]] = Non
     if not sentences:
         return []
 
-    if len(sentences) == 1:
+    if sum(s["words"] for s in sentences) <= settings.CHUNK_TARGET_WORDS:
         return [_build_chunk(sentences, 1)]
 
     if embeddings is None:
